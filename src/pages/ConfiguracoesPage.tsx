@@ -50,8 +50,8 @@ export default function ConfiguracoesPage() {
             <p><span className="font-medium">VITE_SUPABASE_URL:</span>{' '}
               <span className="text-muted-foreground">{import.meta.env.VITE_SUPABASE_URL ? '✅ Configurado' : '❌ Não configurado'}</span>
             </p>
-            <p><span className="font-medium">VITE_SUPABASE_ANON_KEY:</span>{' '}
-              <span className="text-muted-foreground">{import.meta.env.VITE_SUPABASE_ANON_KEY ? '✅ Configurado' : '❌ Não configurado'}</span>
+            <p><span className="font-medium">VITE_SUPABASE_ANON_KEY / VITE_SUPABASE_PUBLISHABLE_KEY:</span>{' '}
+              <span className="text-muted-foreground">{(import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY) ? '✅ Configurado' : '❌ Não configurado'}</span>
             </p>
           </div>
           <p className="mt-3 text-xs text-muted-foreground">

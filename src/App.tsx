@@ -1,22 +1,36 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { Toaster } from "@/components/ui/toaster";
+import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { AuthProvider } from "@/contexts/AuthContext";
-import ProtectedRoute from "@/components/ProtectedRoute";
-import AppLayout from "@/components/AppLayout";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { AuthProvider } from "@/providers/AuthProvider";
+import { OrgProvider } from "@/providers/OrgProvider";
+import { AppShell } from "@/components/layout/AppShell";
 
-import LandingPage from "./pages/LandingPage";
-import LoginPage from "./pages/LoginPage";
-import RegisterPage from "./pages/RegisterPage";
-import DashboardPage from "./pages/DashboardPage";
-import LeadsPage from "./pages/LeadsPage";
-import PipelinePage from "./pages/PipelinePage";
-import AgendaPage from "./pages/AgendaPage";
-import ShowsPage from "./pages/ShowsPage";
-import ReceitaPage from "./pages/ReceitaPage";
-import ConfiguracoesPage from "./pages/ConfiguracoesPage";
+import { LandingPage } from "@/pages/LandingPage";
+import { DashboardPage } from "@/pages/Dashboard";
+import { LeadsKanbanPage } from "@/pages/LeadsKanban";
+import { ContractsCrudPage } from "@/pages/ContractsCrud";
+import { MapViewPage } from "@/pages/MapView";
+import { FinancialPage } from "@/pages/Financial";
+import { ContactsPage } from "@/pages/Contacts";
+import { ArtistCalendarPage } from "@/components/artist-calendar/ArtistCalendarPage";
+import { TeamPage } from "@/pages/Team";
+import { TasksPage } from "@/pages/Tasks";
+import { UsersPage } from "@/pages/Users";
 import NotFound from "./pages/NotFound";
+import Login from "./pages/Login";
+import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
+import { ArtistDashboardPage } from "@/pages/ArtistDashboard";
+import { SuperAdminPage } from "@/pages/SuperAdmin";
+
+// CRM pages
+import { CrmDashboardPage } from "@/pages/CrmDashboard";
+import { CrmLeadsPage } from "@/pages/CrmLeads";
+import { CrmInboxPage } from "@/pages/CrmInbox";
+import { CrmPipelinePage } from "@/pages/CrmPipeline";
+import { CrmAgendaPage } from "@/pages/CrmAgenda";
+import { CrmWhatsAppPage } from "@/pages/CrmWhatsApp";
 
 const queryClient = new QueryClient();
 
@@ -24,24 +38,42 @@ const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
       <Toaster />
+      <Sonner />
       <AuthProvider>
-        <BrowserRouter>
-          <Routes>
-            <Route path="/" element={<LandingPage />} />
-            <Route path="/login" element={<LoginPage />} />
-            <Route path="/registro" element={<RegisterPage />} />
-            <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
-              <Route path="/dashboard" element={<DashboardPage />} />
-              <Route path="/leads" element={<LeadsPage />} />
-              <Route path="/pipeline" element={<PipelinePage />} />
-              <Route path="/agenda" element={<AgendaPage />} />
-              <Route path="/shows" element={<ShowsPage />} />
-              <Route path="/receita" element={<ReceitaPage />} />
-              <Route path="/configuracoes" element={<ConfiguracoesPage />} />
-            </Route>
-            <Route path="*" element={<NotFound />} />
-          </Routes>
-        </BrowserRouter>
+        <OrgProvider>
+          <BrowserRouter>
+            <Routes>
+              {/* Landing Page */}
+              <Route path="/" element={<LandingPage />} />
+              <Route path="/login" element={<Login />} />
+
+              {/* Unified App Routes */}
+              <Route element={<ProtectedRoute />}>
+                <Route path="/app" element={<AppShell />}>
+                  <Route index element={<DashboardPage />} />
+                  <Route path="dashboard" element={<DashboardPage />} />
+                  <Route path="artist" element={<ArtistDashboardPage />} />
+                  <Route path="calendar" element={<ArtistCalendarPage />} />
+                  <Route path="inbox" element={<CrmInboxPage />} />
+                  <Route path="leads" element={<CrmLeadsPage />} />
+                  <Route path="pipeline" element={<CrmPipelinePage />} />
+                  <Route path="agenda" element={<CrmAgendaPage />} />
+                  <Route path="whatsapp" element={<CrmWhatsAppPage />} />
+                  <Route path="contracts" element={<ContractsCrudPage />} />
+                  <Route path="contacts" element={<ContactsPage />} />
+                  <Route path="tasks" element={<TasksPage />} />
+                  <Route path="team" element={<TeamPage />} />
+                  <Route path="users" element={<UsersPage />} />
+                  <Route path="map" element={<MapViewPage />} />
+                  <Route path="financial" element={<FinancialPage />} />
+                  <Route path="admin" element={<SuperAdminPage />} />
+                </Route>
+              </Route>
+
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+          </BrowserRouter>
+        </OrgProvider>
       </AuthProvider>
     </TooltipProvider>
   </QueryClientProvider>

@@ -1,0 +1,144 @@
+import { useOrg } from "@/providers/OrgProvider";
+import { useLeads, useContracts, useCalendarEvents } from "@/hooks/useCrmQueries";
+import { useUserRole } from "@/hooks/useUserRole";
+import { monthStats } from "@/lib/calendar-utils";
+import { format, startOfMonth, endOfMonth, parseISO } from "date-fns";
+import { ptBR } from "date-fns/locale";
+import { MapPin } from "lucide-react";
+import { Card } from "@/components/ui/card";
+import { MapPreview } from "@/components/map/MapPreview";
+import { DashboardStats } from "@/components/dashboard/StatsCards";
+import { UpcomingShows } from "@/components/dashboard/UpcomingShows";
+import { PendingTasks } from "@/components/dashboard/PendingTasks";
+import { RecentActivities } from "@/components/dashboard/RecentActivities";
+import { FinanceQuickCard } from "@/components/dashboard/FinanceQuickCard";
+import {
+  ShowsPerMonthChart,
+  RevenueChart,
+  FunnelPieChart,
+  LeadsPerMonthChart,
+} from "@/components/dashboard/DashboardCharts";
+
+export function DashboardPage() {
+  const { activeOrgId } = useOrg();
+  const { canViewFinancialTotals } = useUserRole();
+  const { data: leads = [] } = useLeads(activeOrgId);
+  const { data: contracts = [] } = useContracts(activeOrgId);
+  const { data: dbEvents = [] } = useCalendarEvents(activeOrgId);
+
+  const now = new Date();
+  const monthStart = startOfMonth(now);
+  const monthEnd = endOfMonth(now);
+  const monthLabel = format(now, "MMMM yyyy", { locale: ptBR });
+
+  const events = dbEvents.map((e: any) => ({
+    id: e.id,
+    title: e.title,
+    status: e.status as "negotiation" | "confirmed" | "blocked" | "hold",
+    start: e.start_time,
+    end: e.end_time,
+    fee: e.fee,
+    city: e.city,
+    state: e.state,
+  }));
+
+  const stats = monthStats(now, events);
+
+  const leadsInNegotiation = leads.filter(
+    (l: any) => l.stage === "Negociação"
+  ).length;
+  const totalEstimated =
+    leads.reduce((acc: number, l: any) => acc + (l.fee || 0), 0) +
+    stats.estimatedRevenue;
+
+  const monthEvents = dbEvents.filter((e: any) => {
+    const d = parseISO(e.start_time);
+    return d >= monthStart && d <= monthEnd;
+  });
+
+  const mapMarkers = [
+    ...leads
+      .filter((l: any) => l.latitude && l.longitude)
+      .map((l: any) => ({
+        id: l.id,
+        type: "lead" as const,
+        lat: parseFloat(l.latitude),
+        lng: parseFloat(l.longitude),
+        title: l.contractor_name,
+        city: l.city,
+        state: l.state,
+        status: l.stage,
+      })),
+    ...dbEvents
+      .filter((e: any) => e.latitude && e.longitude)
+      .map((e: any) => ({
+        id: e.id,
+        type: "event" as const,
+        lat: parseFloat(e.latitude),
+        lng: parseFloat(e.longitude),
+        title: e.title,
+        city: e.city,
+        state: e.state,
+        status: e.status,
+      })),
+  ];
+
+  return (
+    <div className="space-y-6 fade-up">
+      {/* Header */}
+      <div>
+        <h1 className="text-xl font-bold tracking-tight">Dashboard</h1>
+        <p className="text-sm text-muted-foreground capitalize mt-0.5">
+          Visão geral de {monthLabel}
+        </p>
+      </div>
+
+      {/* Main stats */}
+      <DashboardStats
+        confirmedShows={stats.confirmedCount}
+        negotiationCount={stats.negotiationCount}
+        totalLeads={leads.length}
+        estimatedRevenue={totalEstimated}
+        pendingContracts={contracts.filter((c: any) => c.status === "pending").length}
+        freeDays={stats.freeDays}
+      />
+
+      {/* Charts row */}
+      <div className="grid gap-5 lg:grid-cols-2">
+        <ShowsPerMonthChart />
+        <FunnelPieChart />
+      </div>
+
+      {/* Second charts row */}
+      <div className="grid gap-5 lg:grid-cols-2">
+        <RevenueChart />
+        <LeadsPerMonthChart />
+      </div>
+
+      {/* Map + Upcoming shows */}
+      <div className="grid gap-5 lg:grid-cols-3">
+        <Card className="lg:col-span-2 border bg-card shadow-card overflow-hidden">
+          <div className="px-5 py-4 border-b">
+            <h2 className="text-sm font-semibold flex items-center gap-2">
+              <MapPin className="h-4 w-4 text-muted-foreground" />
+              Mapa de Oportunidades
+            </h2>
+            <p className="text-xs text-muted-foreground mt-0.5">Leads e shows no mapa</p>
+          </div>
+          <div className="h-[300px]">
+            <MapPreview markers={mapMarkers} />
+          </div>
+        </Card>
+
+        <UpcomingShows events={monthEvents} />
+      </div>
+
+      {/* Tasks + Activities + Finance */}
+      <div className="grid gap-5 lg:grid-cols-3">
+        <PendingTasks />
+        <RecentActivities />
+        {canViewFinancialTotals && <FinanceQuickCard />}
+      </div>
+    </div>
+  );
+}

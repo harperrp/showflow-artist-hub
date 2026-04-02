@@ -84,7 +84,7 @@ async function resolveLeadPhone(leadId?: string) {
 
   const { data, error } = await supabase
     .from("leads")
-    .select("id, name, phone, whatsapp_phone")
+    .select("id, contractor_name, contact_phone, whatsapp_phone")
     .eq("id", leadId)
     .maybeSingle();
 
@@ -95,14 +95,41 @@ async function resolveLeadPhone(leadId?: string) {
 
   if (!data) return null;
 
-  const phone = normalize(data.whatsapp_phone || data.phone || "");
+  const phone = normalize(data.whatsapp_phone || data.contact_phone || "");
   if (!phone) return null;
 
   return {
     id: data.id,
-    name: data.name,
+    name: data.contractor_name,
     phone,
   };
+}
+
+function extractProviderMessageId(providerResponse: unknown): string | null {
+  if (!providerResponse || typeof providerResponse !== "object") return null;
+
+  const asRecord = providerResponse as Record<string, unknown>;
+  const directMessageId = asRecord.messageId;
+  if (typeof directMessageId === "string" && directMessageId.trim()) return directMessageId;
+
+  const nestedResult = asRecord.result;
+  if (nestedResult && typeof nestedResult === "object") {
+    const resultRecord = nestedResult as Record<string, unknown>;
+    const candidates = [
+      resultRecord.id,
+      resultRecord.messageId,
+      resultRecord.message_id,
+      resultRecord?.data && typeof resultRecord.data === "object"
+        ? (resultRecord.data as Record<string, unknown>).id
+        : null,
+    ];
+
+    for (const candidate of candidates) {
+      if (typeof candidate === "string" && candidate.trim()) return candidate;
+    }
+  }
+
+  return null;
 }
 
 async function sendViaCloud(params: {
@@ -231,13 +258,42 @@ async function sendViaVps(params: {
 
 async function saveInteraction(params: {
   leadId?: string;
+  organizationId?: string;
   text: string;
   mode: SendMode;
   to: string;
+  providerMessageId?: string | null;
+  mediaUrl?: string | null;
 }) {
-  if (!params.leadId) return;
+  if (!params.leadId || !params.organizationId) return;
+
+  const nowIso = new Date().toISOString();
+
+  const { error: messageError } = await supabase.from("lead_messages").insert({
+    organization_id: params.organizationId,
+    lead_id: params.leadId,
+    direction: "outbound",
+    message_text: params.text,
+    message_type: params.mediaUrl ? "image" : "text",
+    media_url: params.mediaUrl ?? null,
+    wa_id: params.to,
+    provider: params.mode,
+    provider_message_id: params.providerMessageId ?? null,
+    status: "sent",
+    delivered_at: nowIso,
+    raw_payload: {
+      to: params.to,
+      provider: params.mode,
+      provider_message_id: params.providerMessageId ?? null,
+    },
+  });
+
+  if (messageError) {
+    console.warn("Não foi possível salvar lead_message:", messageError);
+  }
 
   const { error } = await supabase.from("lead_interactions").insert({
+    organization_id: params.organizationId,
     lead_id: params.leadId,
     type: "message_sent",
     content: params.text,
@@ -255,8 +311,9 @@ async function saveInteraction(params: {
   const { error: leadError } = await supabase
     .from("leads")
     .update({
-      last_contact_at: new Date().toISOString(),
+      last_contact_at: nowIso,
       last_message: params.text,
+      last_message_at: nowIso,
     })
     .eq("id", params.leadId);
 
@@ -319,9 +376,12 @@ serve(async (req) => {
 
     await saveInteraction({
       leadId: body.leadId || resolvedLead?.id,
+      organizationId: body.organizationId,
       text,
       mode,
       to,
+      providerMessageId: extractProviderMessageId(providerResponse),
+      mediaUrl: media_url,
     });
 
     return json({

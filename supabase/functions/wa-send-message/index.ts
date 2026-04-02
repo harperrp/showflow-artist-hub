@@ -7,7 +7,7 @@ const corsHeaders = {
 };
 
 type SendPayload = {
-  mode?: "cloud" | "vps" | "auto";
+  mode?: "cloud" | "vps";
   leadId?: string;
   organizationId?: string;
   to?: string;
@@ -91,7 +91,7 @@ Deno.serve(async (req) => {
   try {
     const body = await req.json() as SendPayload;
     const supabase = buildServiceClient();
-    const mode = body.mode ?? "auto";
+    const mode = body.mode ?? "cloud";
 
     const leadId = body.leadId;
     let organizationId = body.organizationId;
@@ -116,29 +116,7 @@ Deno.serve(async (req) => {
     const messageText = body.text ?? (body.media_url ? "[Mídia]" : "");
     if (!messageText && !body.media_url) throw new Error("Informe text ou media_url");
 
-    const hasCloudConfig = Boolean(Deno.env.get("WHATSAPP_ACCESS_TOKEN") && Deno.env.get("WHATSAPP_PHONE_NUMBER_ID"));
-    const hasVpsConfig = Boolean(Deno.env.get("WHATSAPP_SERVER_URL"));
-
-    let effectiveMode: "cloud" | "vps";
-    if (mode === "auto") {
-      effectiveMode = hasCloudConfig ? "cloud" : "vps";
-    } else {
-      effectiveMode = mode;
-    }
-
-    if (effectiveMode === "cloud" && !hasCloudConfig) {
-      if (hasVpsConfig) {
-        effectiveMode = "vps";
-      } else {
-        throw new Error("Modo cloud selecionado, mas credenciais WHATSAPP_ACCESS_TOKEN/WHATSAPP_PHONE_NUMBER_ID ausentes");
-      }
-    }
-
-    if (effectiveMode === "vps" && !hasVpsConfig) {
-      throw new Error("Modo vps selecionado, mas WHATSAPP_SERVER_URL está ausente");
-    }
-
-    const sendResult = effectiveMode === "vps" ? await sendVps(to, body) : await sendCloud(to, body);
+    const sendResult = mode === "vps" ? await sendVps(to, body) : await sendCloud(to, body);
 
     const now = new Date().toISOString();
     let finalLeadId = leadId ?? null;

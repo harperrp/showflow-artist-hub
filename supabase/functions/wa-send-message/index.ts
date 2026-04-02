@@ -36,12 +36,47 @@ type SendMode = "cloud" | "vps";
 
 interface SendPayload {
   leadId?: string;
+  organizationId?: string;
   to?: string;
   text?: string;
   message?: string;
   media_url?: string | null;
   mode?: SendMode;
   provider?: SendMode;
+}
+
+function parseJsonMap(raw: string | undefined): Record<string, string> {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object") {
+      return parsed as Record<string, string>;
+    }
+  } catch (error) {
+    console.error("Erro ao parsear mapa JSON:", error);
+  }
+  return {};
+}
+
+const VPS_INSTANCE_BY_ORG = parseJsonMap(Deno.env.get("WHATSAPP_VPS_INSTANCE_MAP"));
+const VPS_SENDER_PHONE_BY_ORG = parseJsonMap(Deno.env.get("WHATSAPP_VPS_SENDER_PHONE_MAP"));
+
+function resolveVpsRouting(organizationId?: string) {
+  const fallbackInstance = (Deno.env.get("WHATSAPP_VPS_INSTANCE") || "").trim();
+  const fallbackSenderPhone = normalize(Deno.env.get("WHATSAPP_VPS_SENDER_PHONE") || "");
+
+  const instance = organizationId
+    ? (VPS_INSTANCE_BY_ORG[organizationId] || fallbackInstance).trim()
+    : fallbackInstance;
+
+  const senderPhone = organizationId
+    ? normalize(VPS_SENDER_PHONE_BY_ORG[organizationId] || fallbackSenderPhone)
+    : fallbackSenderPhone;
+
+  return {
+    instance: instance || null,
+    senderPhone: senderPhone || null,
+  };
 }
 
 async function resolveLeadPhone(leadId?: string) {
@@ -128,10 +163,26 @@ async function sendViaVps(params: {
   to: string;
   text: string;
   media_url?: string | null;
+  organizationId?: string;
 }) {
+  const routing = resolveVpsRouting(params.organizationId);
   const payload = {
     number: params.to,
-    phone: params.to,
+    to: params.to,
+    ...(routing.senderPhone
+      ? {
+          phone: routing.senderPhone,
+          sender: routing.senderPhone,
+          from: routing.senderPhone,
+        }
+      : {}),
+    ...(routing.instance
+      ? {
+          instance: routing.instance,
+          session: routing.instance,
+          sessionName: routing.instance,
+        }
+      : {}),
     text: params.text,
     message: params.text,
     media_url: params.media_url ?? null,
@@ -256,7 +307,12 @@ serve(async (req) => {
     let providerResponse: unknown;
 
     if (mode === "vps") {
-      providerResponse = await sendViaVps({ to, text, media_url });
+      providerResponse = await sendViaVps({
+        to,
+        text,
+        media_url,
+        organizationId: body.organizationId,
+      });
     } else {
       providerResponse = await sendViaCloud({ to, text, media_url });
     }
@@ -269,6 +325,7 @@ serve(async (req) => {
     });
 
     return json({
+      ok: true,
       success: true,
       mode,
       to,

@@ -1,191 +1,287 @@
-import { buildServiceClient, normalizePhone } from "../_shared/whatsapp.ts";
+import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+const ACCESS_TOKEN = Deno.env.get("WHATSAPP_ACCESS_TOKEN") ?? "";
+const PHONE_NUMBER_ID = Deno.env.get("WHATSAPP_PHONE_NUMBER_ID") ?? "";
+const WHATSAPP_SERVER_URL = (
+  Deno.env.get("WHATSAPP_SERVER_URL") ??
+  "https://whatsapp.likedigitalmkt.com.br"
+).replace(/\/+$/, "");
+
+const supabase = createClient(SUPABASE_URL, SERVICE_ROLE);
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST,OPTIONS",
+  "Access-Control-Allow-Headers": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-type SendPayload = {
-  mode?: "cloud" | "vps";
+function json(data: unknown, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: {
+      "Content-Type": "application/json",
+      ...corsHeaders,
+    },
+  });
+}
+
+function normalize(phone: string) {
+  return String(phone || "").replace(/[^\d]/g, "");
+}
+
+type SendMode = "cloud" | "vps";
+
+interface SendPayload {
   leadId?: string;
-  organizationId?: string;
   to?: string;
   text?: string;
-  media_url?: string;
-};
+  message?: string;
+  media_url?: string | null;
+  mode?: SendMode;
+  provider?: SendMode;
+}
 
-async function sendCloud(to: string, payload: SendPayload) {
-  const token = Deno.env.get("WHATSAPP_ACCESS_TOKEN");
-  const phoneNumberId = Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
-  if (!token || !phoneNumberId) throw new Error("WHATSAPP_ACCESS_TOKEN/WHATSAPP_PHONE_NUMBER_ID ausentes");
+async function resolveLeadPhone(leadId?: string) {
+  if (!leadId) return null;
 
-  const body = payload.media_url
-    ? {
-      messaging_product: "whatsapp",
-      to,
-      type: "image",
-      image: { link: payload.media_url, caption: payload.text ?? undefined },
-    }
-    : {
-      messaging_product: "whatsapp",
-      to,
-      type: "text",
-      text: { body: payload.text ?? "" },
-    };
+  const { data, error } = await supabase
+    .from("leads")
+    .select("id, name, phone, whatsapp_phone")
+    .eq("id", leadId)
+    .maybeSingle();
 
-  const res = await fetch(`https://graph.facebook.com/v23.0/${phoneNumberId}/messages`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-    body: JSON.stringify(body),
-  });
-
-  const data = await res.json();
-  if (!res.ok) {
-    throw new Error(`Cloud API error (${res.status}): ${JSON.stringify(data)}`);
+  if (error) {
+    console.error("Erro ao buscar lead:", error);
+    throw new Error("Erro ao buscar lead");
   }
 
+  if (!data) return null;
+
+  const phone = normalize(data.whatsapp_phone || data.phone || "");
+  if (!phone) return null;
+
   return {
-    provider: "cloud",
-    providerMessageId: data?.messages?.[0]?.id ?? null,
-    status: "sent",
-    response: data,
+    id: data.id,
+    name: data.name,
+    phone,
   };
 }
 
-async function sendVps(to: string, payload: SendPayload) {
-  const baseUrl = Deno.env.get("WHATSAPP_SERVER_URL");
-  if (!baseUrl) throw new Error("WHATSAPP_SERVER_URL ausente");
-
-  const endpoints = ["/send-message", "/message/send", "/send"];
-  let lastError = "";
-
-  for (const endpoint of endpoints) {
-    const response = await fetch(`${baseUrl}${endpoint}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ to, text: payload.text, media_url: payload.media_url }),
-    });
-
-    const json = await response.json().catch(() => ({}));
-    if (response.ok) {
-      return {
-        provider: "vps",
-        providerMessageId: json?.messageId ?? json?.id ?? null,
-        status: json?.status ?? "sent",
-        endpoint,
-        response: json,
-      };
-    }
-
-    lastError = `${endpoint}: ${JSON.stringify(json)}`;
+async function sendViaCloud(params: {
+  to: string;
+  text: string;
+  media_url?: string | null;
+}) {
+  if (!ACCESS_TOKEN || !PHONE_NUMBER_ID) {
+    throw new Error(
+      "WHATSAPP_ACCESS_TOKEN ou WHATSAPP_PHONE_NUMBER_ID não configurados",
+    );
   }
 
-  throw new Error(`Nenhum endpoint VPS funcionou. Último erro: ${lastError}`);
+  const payload = params.media_url
+    ? {
+        messaging_product: "whatsapp",
+        recipient_type: "individual",
+        to: params.to,
+        type: "image",
+        image: {
+          link: params.media_url,
+          caption: params.text || undefined,
+        },
+      }
+    : {
+        messaging_product: "whatsapp",
+        recipient_type: "individual",
+        to: params.to,
+        type: "text",
+        text: {
+          body: params.text,
+        },
+      };
+
+  const response = await fetch(
+    `https://graph.facebook.com/v21.0/${PHONE_NUMBER_ID}/messages`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${ACCESS_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    },
+  );
+
+  const result = await response.json();
+
+  if (!response.ok) {
+    console.error("Erro Cloud API:", result);
+    throw new Error(result?.error?.message || "Erro ao enviar pela Cloud API");
+  }
+
+  return result;
 }
 
-Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
-  if (req.method !== "POST") return new Response("Method not allowed", { status: 405, headers: corsHeaders });
+async function sendViaVps(params: {
+  to: string;
+  text: string;
+  media_url?: string | null;
+}) {
+  const payload = {
+    number: params.to,
+    phone: params.to,
+    text: params.text,
+    message: params.text,
+    media_url: params.media_url ?? null,
+  };
+
+  const tryEndpoints = [
+    `${WHATSAPP_SERVER_URL}/send-message`,
+    `${WHATSAPP_SERVER_URL}/message/send`,
+    `${WHATSAPP_SERVER_URL}/send`,
+  ];
+
+  let lastError: unknown = null;
+
+  for (const endpoint of tryEndpoints) {
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const contentType = response.headers.get("content-type") || "";
+      const result = contentType.includes("application/json")
+        ? await response.json()
+        : await response.text();
+
+      if (!response.ok) {
+        lastError = result;
+        continue;
+      }
+
+      return {
+        endpoint,
+        result,
+      };
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  console.error("Erro VPS:", lastError);
+  throw new Error("Erro ao enviar mensagem pela VPS");
+}
+
+async function saveInteraction(params: {
+  leadId?: string;
+  text: string;
+  mode: SendMode;
+  to: string;
+}) {
+  if (!params.leadId) return;
+
+  const { error } = await supabase.from("lead_interactions").insert({
+    lead_id: params.leadId,
+    type: "message_sent",
+    content: params.text,
+    metadata: {
+      to: params.to,
+      provider: params.mode,
+      channel: params.mode === "vps" ? "whatsapp_vps" : "whatsapp_cloud",
+    },
+  });
+
+  if (error) {
+    console.warn("Não foi possível salvar interaction:", error);
+  }
+
+  const { error: leadError } = await supabase
+    .from("leads")
+    .update({
+      last_contact_at: new Date().toISOString(),
+      last_message: params.text,
+    })
+    .eq("id", params.leadId);
+
+  if (leadError) {
+    console.warn("Não foi possível atualizar lead:", leadError);
+  }
+}
+
+serve(async (req) => {
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
+  }
+
+  if (req.method !== "POST") {
+    return json({ error: "Method not allowed" }, 405);
+  }
 
   try {
-    const body = await req.json() as SendPayload;
-    const supabase = buildServiceClient();
-    const mode = body.mode ?? (Deno.env.get("WHATSAPP_SEND_MODE") ?? "vps") as "cloud" | "vps";
+    const body = (await req.json()) as SendPayload;
 
-    const leadId = body.leadId;
-    let organizationId = body.organizationId;
-    let to = normalizePhone(body.to ?? null);
+    const mode: SendMode =
+      body.mode || body.provider || "vps";
 
-    if (leadId) {
-      const { data: lead, error } = await supabase
-        .from("leads")
-        .select("id, organization_id, whatsapp_phone, contact_phone")
-        .eq("id", leadId)
-        .single();
-
-      if (error) throw error;
-      organizationId = organizationId ?? lead.organization_id;
-      to = to || normalizePhone(lead.whatsapp_phone ?? lead.contact_phone);
+    const text = String(body.text || body.message || "").trim();
+    if (!text) {
+      return json({ error: "Mensagem não informada" }, 400);
     }
 
-    if (!organizationId || !to) {
-      throw new Error("organizationId e destino (to ou leadId com telefone) são obrigatórios");
+    let to = normalize(body.to || "");
+    let resolvedLead:
+      | { id: string; name?: string | null; phone: string }
+      | null = null;
+
+    if (!to && body.leadId) {
+      resolvedLead = await resolveLeadPhone(body.leadId);
+      if (!resolvedLead?.phone) {
+        return json({ error: "Lead sem telefone válido" }, 400);
+      }
+      to = resolvedLead.phone;
     }
 
-    const messageText = body.text ?? (body.media_url ? "[Mídia]" : "");
-    if (!messageText && !body.media_url) throw new Error("Informe text ou media_url");
-
-    const sendResult = mode === "vps" ? await sendVps(to, body) : await sendCloud(to, body);
-
-    const now = new Date().toISOString();
-    let finalLeadId = leadId ?? null;
-
-    if (!finalLeadId) {
-      const { data: byPhone } = await supabase
-        .from("leads")
-        .select("id")
-        .eq("organization_id", organizationId)
-        .or(`whatsapp_phone.eq.${to},contact_phone.eq.${to}`)
-        .order("updated_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      finalLeadId = byPhone?.id ?? null;
+    if (!to) {
+      return json({ error: "Destino não informado" }, 400);
     }
 
-    if (!finalLeadId) throw new Error("Não foi possível resolver lead para persistir o histórico.");
+    const media_url = body.media_url ?? null;
 
-    const { data: messageRow, error: msgError } = await supabase
-      .from("lead_messages")
-      .insert({
-        organization_id: organizationId,
-        lead_id: finalLeadId,
-        direction: "outbound",
-        message_text: messageText,
-        message_type: body.media_url ? "image" : "text",
-        media_url: body.media_url ?? null,
-        wa_id: to,
-        provider: sendResult.provider,
-        provider_message_id: sendResult.providerMessageId,
-        status: sendResult.status,
-        raw_payload: sendResult.response,
-        delivered_at: now,
-      })
-      .select("id")
-      .single();
+    let providerResponse: unknown;
 
-    if (msgError) throw msgError;
+    if (mode === "vps") {
+      providerResponse = await sendViaVps({ to, text, media_url });
+    } else {
+      providerResponse = await sendViaCloud({ to, text, media_url });
+    }
 
-    await supabase.from("lead_interactions").insert({
-      organization_id: organizationId,
-      lead_id: finalLeadId,
-      event_type: "message_sent",
-      channel: "whatsapp",
-      content: messageText,
-      payload: sendResult.response,
-      metadata: {
-        provider: sendResult.provider,
-        provider_message_id: sendResult.providerMessageId,
-        status: sendResult.status,
-        endpoint: "endpoint" in sendResult ? sendResult.endpoint ?? null : null,
-      },
+    await saveInteraction({
+      leadId: body.leadId || resolvedLead?.id,
+      text,
+      mode,
+      to,
     });
 
-    await supabase.from("leads").update({
-      last_message: messageText,
-      last_message_at: now,
-      last_contact_at: now,
-      updated_at: now,
-    }).eq("id", finalLeadId);
-
-    return new Response(JSON.stringify({ ok: true, leadId: finalLeadId, messageId: messageRow.id, sendResult }), {
-      status: 200,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    return json({
+      success: true,
+      mode,
+      to,
+      providerResponse,
     });
   } catch (error) {
-    return new Response(JSON.stringify({ ok: false, error: String(error) }), {
-      status: 400,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    console.error("wa-send-message error:", error);
+    return json(
+      {
+        success: false,
+        error: error instanceof Error ? error.message : "Erro interno",
+      },
+      500,
+    );
   }
 });

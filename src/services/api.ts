@@ -13,6 +13,15 @@ type FunnelStageRow = Database["public"]["Tables"]["funnel_stages"]["Row"];
 type NoteRow = Database["public"]["Tables"]["notes"]["Row"];
 type NoteInsert = Database["public"]["Tables"]["notes"]["Insert"];
 type LeadMessageRow = Database["public"]["Tables"]["lead_messages"]["Row"];
+type LeadInteractionRow = {
+  id: string;
+  lead_id: string | null;
+  organization_id: string | null;
+  type: string | null;
+  content: string | null;
+  metadata: Record<string, unknown> | null;
+  created_at: string;
+};
 type CalendarEventRow = Database["public"]["Tables"]["calendar_events"]["Row"];
 type CalendarEventInsert = Database["public"]["Tables"]["calendar_events"]["Insert"];
 
@@ -222,17 +231,73 @@ export async function createNote(note: { organization_id: string; entity_id: str
   return data;
 }
 
+function mapLeadInteractionRowToMessage(row: LeadInteractionRow): Message | null {
+  const type = row.type ?? "";
+  const metadata = row.metadata ?? {};
+
+  if (type !== "message_sent" && type !== "message_received") {
+    return null;
+  }
+
+  return {
+    id: row.id,
+    lead_id: row.lead_id ?? "",
+    organization_id: row.organization_id ?? "",
+    direction: type === "message_received" ? "inbound" : "outbound",
+    message_text: row.content ?? "",
+    message_type: String((metadata as Record<string, unknown>).message_type ?? "text"),
+    media_url: ((metadata as Record<string, unknown>).media_url as string | null | undefined) ?? null,
+    wa_id: ((metadata as Record<string, unknown>).wa_id as string | null | undefined) ?? null,
+    provider: ((metadata as Record<string, unknown>).provider as string | null | undefined) ?? null,
+    provider_message_id: ((metadata as Record<string, unknown>).provider_message_id as string | null | undefined) ?? null,
+    status: ((metadata as Record<string, unknown>).status as string | null | undefined) ?? null,
+    created_at: row.created_at,
+  };
+}
+
 export async function fetchMessages(leadId: string): Promise<Message[]> {
   const requiredLeadId = assertRequiredId(leadId, "lead_id");
 
-  const { data, error } = await supabase
-    .from("lead_messages")
-    .select("*")
-    .eq("lead_id", requiredLeadId)
-    .order("created_at", { ascending: true });
+  const [{ data: leadMessages, error: leadMessagesError }, { data: leadInteractions, error: leadInteractionsError }] = await Promise.all([
+    supabase
+      .from("lead_messages")
+      .select("*")
+      .eq("lead_id", requiredLeadId)
+      .order("created_at", { ascending: true }),
+    (supabase as any)
+      .from("lead_interactions")
+      .select("id, lead_id, organization_id, type, content, metadata, created_at")
+      .eq("lead_id", requiredLeadId)
+      .in("type", ["message_sent", "message_received"])
+      .order("created_at", { ascending: true }),
+  ]);
 
-  if (error) throw error;
-  return (data ?? []) as LeadMessageRow[] as Message[];
+  if (leadMessagesError) throw leadMessagesError;
+  if (leadInteractionsError) throw leadInteractionsError;
+
+  const normalizedLeadMessages = ((leadMessages ?? []) as LeadMessageRow[]).map((row) => ({
+    ...(row as unknown as Message),
+    message_text: (row as any).message_text ?? (row as any).content ?? null,
+  }));
+
+  const normalizedLeadInteractions = ((leadInteractions ?? []) as LeadInteractionRow[])
+    .map(mapLeadInteractionRowToMessage)
+    .filter((message): message is Message => Boolean(message));
+
+  const merged = [...normalizedLeadMessages, ...normalizedLeadInteractions]
+    .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+
+  const deduped = merged.filter((message, index, arr) =>
+    arr.findIndex((candidate) =>
+      candidate.id === message.id || (
+        candidate.created_at === message.created_at &&
+        candidate.direction === message.direction &&
+        candidate.message_text === message.message_text
+      )
+    ) === index
+  );
+
+  return deduped;
 }
 
 export async function sendMessage(msg: {

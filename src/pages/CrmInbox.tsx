@@ -79,13 +79,26 @@ export function CrmInboxPage() {
   useEffect(() => {
     if (!activeOrgId) return;
 
-    return api.subscribeToTable("lead_messages", null, () => {
+    const unsubscribeLeadMessages = api.subscribeToTable("lead_messages", null, () => {
       qc.invalidateQueries({ queryKey: ["crm-conversations", activeOrgId] });
 
       if (selected?.lead_id) {
         qc.invalidateQueries({ queryKey: ["crm-messages", selected.lead_id] });
       }
     });
+
+    const unsubscribeLeadInteractions = api.subscribeToTable("lead_interactions", null, () => {
+      qc.invalidateQueries({ queryKey: ["crm-conversations", activeOrgId] });
+
+      if (selected?.lead_id) {
+        qc.invalidateQueries({ queryKey: ["crm-messages", selected.lead_id] });
+      }
+    });
+
+    return () => {
+      unsubscribeLeadMessages();
+      unsubscribeLeadInteractions();
+    };
   }, [activeOrgId, selected?.lead_id, qc]);
 
   useEffect(() => {

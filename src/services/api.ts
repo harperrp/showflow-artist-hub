@@ -235,7 +235,7 @@ export async function sendMessage(msg: {
   organization_id: string;
   message_text?: string;
   to?: string;
-  mode?: "cloud" | "vps";
+  mode?: "cloud" | "vps" | "auto";
   media_url?: string;
 }) {
   const requiredOrgId = assertRequiredId(msg.organization_id, "organization_id");
@@ -246,7 +246,7 @@ export async function sendMessage(msg: {
       organizationId: requiredOrgId,
       to: msg.to,
       text: msg.message_text,
-      mode: msg.mode ?? "cloud",
+      mode: msg.mode ?? "auto",
       media_url: msg.media_url,
     },
   });

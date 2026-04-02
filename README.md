@@ -28,6 +28,7 @@ npm run dev
 - `WHATSAPP_ACCESS_TOKEN`
 - `WHATSAPP_PHONE_NUMBER_ID`
 - `WHATSAPP_SERVER_URL`
+- `WHATSAPP_SEND_MODE` (`vps` ou `cloud`)
 
 ### Comandos de migração
 

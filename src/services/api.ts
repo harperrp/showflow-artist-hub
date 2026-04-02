@@ -185,7 +185,12 @@ export async function updateConversation(id: string, updates: Partial<Conversati
 
 export async function markConversationRead(leadId: string) {
   const requiredLeadId = assertRequiredId(leadId, "lead_id");
-  const { error } = await supabase.rpc("mark_lead_conversation_read", { _lead_id: requiredLeadId });
+
+  const { error } = await supabase
+    .from("leads")
+    .update({ unread_count: 0, updated_at: new Date().toISOString() })
+    .eq("id", requiredLeadId);
+
   if (error) throw error;
 }
 
@@ -246,7 +251,7 @@ export async function sendMessage(msg: {
       organizationId: requiredOrgId,
       to: msg.to,
       text: msg.message_text,
-      mode: msg.mode ?? "cloud",
+      mode: msg.mode ?? (import.meta.env.VITE_WHATSAPP_SEND_MODE ?? "vps"),
       media_url: msg.media_url,
     },
   });

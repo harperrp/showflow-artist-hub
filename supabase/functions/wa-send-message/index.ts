@@ -91,7 +91,7 @@ Deno.serve(async (req) => {
   try {
     const body = await req.json() as SendPayload;
     const supabase = buildServiceClient();
-    const mode = body.mode ?? "cloud";
+    const mode = body.mode ?? (Deno.env.get("WHATSAPP_SEND_MODE") ?? "vps") as "cloud" | "vps";
 
     const leadId = body.leadId;
     let organizationId = body.organizationId;

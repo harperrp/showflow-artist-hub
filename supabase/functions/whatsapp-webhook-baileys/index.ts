@@ -127,7 +127,7 @@ function parseBaileysPayload(payload: any) {
       messageType,
       mediaUrl,
       rawPayload: raw,
-      provider: "baileys" as const,
+      provider: "vps" as const,
       providerMessageId: key?.id ?? raw?.id ?? null,
       deliveredAt: raw?.messageTimestamp
         ? new Date(Number(raw.messageTimestamp) * 1000).toISOString()
@@ -165,7 +165,7 @@ Deno.serve(async (req) => {
       await applyStatusEvent(supabase, {
         organizationId: orgId,
         phone: body?.phone,
-        provider: "baileys",
+        provider: "vps",
         providerMessageId: body?.provider_message_id,
         status: body?.status,
         rawPayload: body,

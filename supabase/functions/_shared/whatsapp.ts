@@ -113,6 +113,7 @@ export function mapMessageContent(message: any) {
 export async function processInboundMessage(supabase: SupabaseClient, message: NormalizedInboundMessage) {
   const nowIso = message.deliveredAt ?? new Date().toISOString();
   const normalizedPhone = normalizePhone(message.phone);
+  const normalizedProvider = message.provider === "baileys" ? "vps" : message.provider;
 
   if (!normalizedPhone) {
     return { ok: false, reason: "missing_phone" };
@@ -120,7 +121,7 @@ export async function processInboundMessage(supabase: SupabaseClient, message: N
 
   if (!isLikelyValidWhatsappPhone(normalizedPhone)) {
     console.warn("[inbound] invalid_phone_rejected", {
-      provider: message.provider,
+      provider: normalizedProvider,
       phone: message.phone,
       normalizedPhone,
     });
@@ -258,7 +259,7 @@ export async function processInboundMessage(supabase: SupabaseClient, message: N
       message_type: message.messageType,
       media_url: message.mediaUrl,
       wa_id: message.waId ?? normalizedPhone,
-      provider: message.provider,
+      provider: normalizedProvider,
       provider_message_id: message.providerMessageId,
       status: message.status,
       raw_payload: message.rawPayload,
@@ -280,7 +281,7 @@ export async function processInboundMessage(supabase: SupabaseClient, message: N
     type: "message_received",
     content: message.messageText,
     metadata: {
-      provider: message.provider,
+      provider: normalizedProvider,
       channel: "whatsapp",
       message_type: message.messageType,
       media_url: message.mediaUrl,
@@ -304,7 +305,7 @@ export async function processInboundMessage(supabase: SupabaseClient, message: N
       _phone: normalizedPhone,
       _message_text: message.messageText,
       _message_type: message.messageType,
-      _provider: message.provider,
+      _provider: normalizedProvider,
       _provider_message_id: message.providerMessageId,
       _status: message.status,
       _raw_payload: message.rawPayload,
@@ -342,6 +343,7 @@ export async function applyStatusEvent(
   },
 ) {
   const normalizedPhone = normalizePhone(input.phone);
+  const normalizedProvider = input.provider === "baileys" ? "vps" : input.provider;
 
   const { data: lead } =
     normalizedPhone && isLikelyValidWhatsappPhone(normalizedPhone)
@@ -372,7 +374,7 @@ export async function applyStatusEvent(
       type: "message_status",
       content: input.status ?? null,
       metadata: {
-        provider: input.provider,
+        provider: normalizedProvider,
         provider_message_id: input.providerMessageId,
         channel: "whatsapp",
         raw_payload: input.rawPayload,

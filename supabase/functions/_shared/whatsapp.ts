@@ -40,7 +40,6 @@ export function isIgnorableWhatsappJid(remoteJid?: string | null) {
     value === "status@broadcast" ||
     value.endsWith("@broadcast") ||
     value.endsWith("@newsletter") ||
-    value.includes("lid") ||
     value.includes("broadcast")
   );
 }
@@ -139,8 +138,6 @@ export async function processInboundMessage(supabase: SupabaseClient, message: N
 
   if (!organization) return { ok: false, reason: "organization_not_found" };
 
-  console.log("[inbound] organization resolved", { orgId, normalizedPhone });
-
   const { data: stage } = await supabase
     .from("funnel_stages")
     .select("name")
@@ -176,9 +173,6 @@ export async function processInboundMessage(supabase: SupabaseClient, message: N
     }
 
     contactId = newContact.id;
-    console.log("[inbound] contact created", { contactId, phone: normalizedPhone });
-  } else {
-    console.log("[inbound] contact found", { contactId, phone: normalizedPhone });
   }
 
   const { data: existingLead } = await supabase
@@ -218,9 +212,6 @@ export async function processInboundMessage(supabase: SupabaseClient, message: N
     }
 
     leadId = newLead.id;
-    console.log("[inbound] lead created", { leadId });
-  } else {
-    console.log("[inbound] lead found", { leadId });
   }
 
   const { data: currentLead } = await supabase
@@ -245,8 +236,6 @@ export async function processInboundMessage(supabase: SupabaseClient, message: N
 
   if (leadUpdateError) {
     console.error("[inbound] lead update failed", leadUpdateError);
-  } else {
-    console.log("[inbound] lead updated", { leadId });
   }
 
   const { data: messageRow, error: messageInsertError } = await supabase
@@ -259,7 +248,6 @@ export async function processInboundMessage(supabase: SupabaseClient, message: N
       message_type: message.messageType,
       media_url: message.mediaUrl,
       wa_id: message.waId ?? normalizedPhone,
-      provider: normalizedProvider,
       provider_message_id: message.providerMessageId,
       status: message.status,
       raw_payload: message.rawPayload,
@@ -272,8 +260,6 @@ export async function processInboundMessage(supabase: SupabaseClient, message: N
     console.error("[inbound] message insert failed", messageInsertError);
     return { ok: false, reason: "message_insert_failed", error: messageInsertError.message };
   }
-
-  console.log("[inbound] message inserted", { messageId: messageRow.id });
 
   const { error: interactionError } = await supabase.from("lead_interactions").insert({
     organization_id: orgId,
@@ -288,14 +274,13 @@ export async function processInboundMessage(supabase: SupabaseClient, message: N
       provider_message_id: message.providerMessageId,
       lead_message_id: messageRow.id,
       wa_id: message.waId ?? normalizedPhone,
+      status: message.status ?? null,
     },
     created_at: nowIso,
   });
 
   if (interactionError) {
     console.error("[inbound] interaction insert failed", interactionError);
-  } else {
-    console.log("[inbound] interaction inserted", { leadId });
   }
 
   try {
@@ -314,8 +299,6 @@ export async function processInboundMessage(supabase: SupabaseClient, message: N
 
     if (rpcError) {
       console.error("[inbound] rpc skipped due error", rpcError);
-    } else {
-      console.log("[inbound] rpc executed", { leadId });
     }
   } catch (rpcError) {
     console.error("[inbound] rpc crashed", rpcError);

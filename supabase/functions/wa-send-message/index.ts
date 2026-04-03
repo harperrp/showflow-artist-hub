@@ -285,7 +285,6 @@ async function saveInteraction(params: {
     message_type: params.mediaUrl ? "image" : "text",
     media_url: params.mediaUrl ?? null,
     wa_id: params.to,
-    provider: params.mode,
     provider_message_id: params.providerMessageId ?? null,
     status: "sent",
     delivered_at: nowIso,

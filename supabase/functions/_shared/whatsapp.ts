@@ -40,14 +40,21 @@ export function isIgnorableWhatsappJid(remoteJid?: string | null) {
     value === "status@broadcast" ||
     value.endsWith("@broadcast") ||
     value.endsWith("@newsletter") ||
-    value.includes("broadcast")
+    value.includes("broadcast") ||
+    value.endsWith("@lid")
   );
 }
 
 export function extractPhoneFromWhatsappJid(remoteJid?: string | null) {
   if (!remoteJid || isIgnorableWhatsappJid(remoteJid)) return "";
 
-  const base = String(remoteJid).split("@")[0] ?? "";
+  const value = String(remoteJid).trim().toLowerCase();
+
+  if (!value.endsWith("@s.whatsapp.net") && !value.endsWith("@c.us")) {
+    return "";
+  }
+
+  const base = value.split("@")[0] ?? "";
   const normalized = normalizePhone(base);
 
   if (!isLikelyValidWhatsappPhone(normalized)) return "";

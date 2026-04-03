@@ -128,7 +128,38 @@ export async function fetchLeads(orgId: string): Promise<Lead[]> {
   if (error) throw error;
   return (data ?? []) as unknown as Lead[];
 }
+export async function deleteLead(id: string) {
+  const requiredLeadId = assertRequiredId(id, "lead_id");
 
+  const { error: notesError } = await supabase
+    .from("notes")
+    .delete()
+    .eq("entity_type", "lead")
+    .eq("entity_id", requiredLeadId);
+
+  if (notesError) throw notesError;
+
+  const { error: messagesError } = await supabase
+    .from("lead_messages")
+    .delete()
+    .eq("lead_id", requiredLeadId);
+
+  if (messagesError) throw messagesError;
+
+  const { error: interactionsError } = await supabase
+    .from("lead_interactions")
+    .delete()
+    .eq("lead_id", requiredLeadId);
+
+  if (interactionsError) throw interactionsError;
+
+  const { error } = await supabase
+    .from("leads")
+    .delete()
+    .eq("id", requiredLeadId);
+
+  if (error) throw error;
+}
 export async function createLead(lead: Partial<Lead> & { organization_id: string; contractor_name: string; created_by: string }) {
   const payload: LeadInsert = {
     ...lead,

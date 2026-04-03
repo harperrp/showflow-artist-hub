@@ -1,7 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { CalendarDays, KanbanSquare, MapPin, Phone, Send, User, Users } from "lucide-react";
+import {
+  CalendarDays,
+  KanbanSquare,
+  MapPin,
+  Phone,
+  Send,
+  Trash2,
+  User,
+  Users,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { Card } from "@/components/ui/card";
@@ -67,7 +76,6 @@ export function LeadPanel({ conversation, stages }: Props) {
 
   useEffect(() => {
     setEditName(lead?.contractor_name || conversation.contact_name || "");
-    // Normalize phone when loading initial state to ensure consistent formatting
     setEditPhone(normalizePhone(lead?.contact_phone || conversation.contact_phone || ""));
   }, [lead?.id, lead?.contractor_name, lead?.contact_phone, conversation.contact_name, conversation.contact_phone]);
 
@@ -99,7 +107,6 @@ export function LeadPanel({ conversation, stages }: Props) {
       if (!leadId) throw new Error("Lead não encontrado");
       return api.updateLead(leadId, {
         contractor_name: editName.trim() || "Sem nome",
-        // Normalize phone before persisting to avoid duplicates due to formatting
         contact_phone: normalizePhone(editPhone) || null,
       });
     },
@@ -108,6 +115,22 @@ export function LeadPanel({ conversation, stages }: Props) {
       qc.invalidateQueries({ queryKey: ["crm-leads"] });
       qc.invalidateQueries({ queryKey: ["leads", activeOrgId] });
       toast.success("Contato atualizado");
+    },
+    onError: (error: Error) => toast.error(error.message),
+  });
+
+  const deleteLeadMut = useMutation({
+    mutationFn: async () => {
+      if (!leadId) throw new Error("Lead não encontrado");
+      return api.deleteLead(leadId);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["crm-conversations", activeOrgId] });
+      qc.invalidateQueries({ queryKey: ["crm-leads"] });
+      qc.invalidateQueries({ queryKey: ["leads", activeOrgId] });
+      qc.invalidateQueries({ queryKey: ["notes", leadId] });
+      toast.success("Lead excluído");
+      navigate("/app/inbox");
     },
     onError: (error: Error) => toast.error(error.message),
   });
@@ -135,7 +158,6 @@ export function LeadPanel({ conversation, stages }: Props) {
       leadId,
       title: normaliseAgendaTitle(editName || conversation.contact_name || ""),
       contractorName: editName || conversation.contact_name || "",
-      // Normalize phone number before passing to agenda prefill
       contactPhone: normalizePhone(editPhone || conversation.contact_phone || ""),
       city: lead?.city ?? "",
       state: lead?.state ?? "",
@@ -148,6 +170,17 @@ export function LeadPanel({ conversation, stages }: Props) {
     localStorage.setItem(AGENDA_PREFILL_KEY, JSON.stringify(payload));
     navigate("/app/agenda");
     toast.success("Lead enviado para a agenda");
+  };
+
+  const handleDeleteLead = () => {
+    if (!leadId) return;
+
+    const confirmed = window.confirm(
+      `Tem certeza que deseja excluir o lead "${conversation.contact_name || editName || "Sem nome"}"? Essa ação remove mensagens, interações e notas relacionadas.`
+    );
+
+    if (!confirmed) return;
+    deleteLeadMut.mutate();
   };
 
   return (
@@ -208,6 +241,19 @@ export function LeadPanel({ conversation, stages }: Props) {
               Contatos
             </Button>
           </div>
+
+          {leadId && (
+            <Button
+              size="sm"
+              variant="destructive"
+              className="h-8 w-full justify-center gap-2 text-xs"
+              onClick={handleDeleteLead}
+              disabled={deleteLeadMut.isPending}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              {deleteLeadMut.isPending ? "Excluindo..." : "Excluir lead"}
+            </Button>
+          )}
         </Card>
 
         {lead && (
@@ -240,7 +286,6 @@ export function LeadPanel({ conversation, stages }: Props) {
                 value={editPhone}
                 onChange={(event) => {
                   const rawValue = event.target.value;
-                  // Restrict input to digits only
                   setEditPhone(rawValue.replace(/[^\d]/g, ""));
                 }}
                 placeholder="Telefone"

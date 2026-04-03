@@ -70,7 +70,7 @@ function mapConversationUpdatesToLeadUpdates(updates: Partial<Conversation>): Le
   }
 
   if (updates.stage !== undefined) {
-    leadUpdates.stage = updates.stage;
+    (leadUpdates as any).stage = updates.stage;
   }
 
   return leadUpdates;

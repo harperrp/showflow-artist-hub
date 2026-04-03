@@ -26,6 +26,35 @@ export function normalizePhone(phone?: string | null) {
   return (phone ?? "").replace(/[^\d]/g, "");
 }
 
+export function isLikelyValidWhatsappPhone(phone?: string | null) {
+  const normalized = normalizePhone(phone);
+  return normalized.length >= 10 && normalized.length <= 15;
+}
+
+export function isIgnorableWhatsappJid(remoteJid?: string | null) {
+  const value = String(remoteJid ?? "").trim().toLowerCase();
+  if (!value) return true;
+
+  return (
+    value.endsWith("@g.us") ||
+    value === "status@broadcast" ||
+    value.endsWith("@broadcast") ||
+    value.endsWith("@newsletter") ||
+    value.includes("lid") ||
+    value.includes("broadcast")
+  );
+}
+
+export function extractPhoneFromWhatsappJid(remoteJid?: string | null) {
+  if (!remoteJid || isIgnorableWhatsappJid(remoteJid)) return "";
+
+  const base = String(remoteJid).split("@")[0] ?? "";
+  const normalized = normalizePhone(base);
+
+  if (!isLikelyValidWhatsappPhone(normalized)) return "";
+  return normalized;
+}
+
 export function resolveOrganizationId(metadataPhoneNumberId?: string | null, explicitOrgId?: string | null): string | null {
   if (explicitOrgId) return explicitOrgId;
 
@@ -84,14 +113,32 @@ export function mapMessageContent(message: any) {
 export async function processInboundMessage(supabase: SupabaseClient, message: NormalizedInboundMessage) {
   const nowIso = message.deliveredAt ?? new Date().toISOString();
   const normalizedPhone = normalizePhone(message.phone);
-  if (!normalizedPhone) return { ok: false, reason: "missing_phone" };
+
+  if (!normalizedPhone) {
+    return { ok: false, reason: "missing_phone" };
+  }
+
+  if (!isLikelyValidWhatsappPhone(normalizedPhone)) {
+    console.warn("[inbound] invalid_phone_rejected", {
+      provider: message.provider,
+      phone: message.phone,
+      normalizedPhone,
+    });
+    return { ok: false, reason: "invalid_phone" };
+  }
 
   const orgId = message.organizationId;
   if (!orgId) return { ok: false, reason: "missing_org" };
 
-  const { data: organization } = await supabase.from("organizations").select("id, created_by").eq("id", orgId).maybeSingle();
+  const { data: organization } = await supabase
+    .from("organizations")
+    .select("id, created_by")
+    .eq("id", orgId)
+    .maybeSingle();
+
   if (!organization) return { ok: false, reason: "organization_not_found" };
-  console.log("[inbound] organization resolved", { orgId });
+
+  console.log("[inbound] organization resolved", { orgId, normalizedPhone });
 
   const { data: stage } = await supabase
     .from("funnel_stages")
@@ -109,6 +156,7 @@ export async function processInboundMessage(supabase: SupabaseClient, message: N
     .maybeSingle();
 
   let contactId = existingContact?.id;
+
   if (!contactId) {
     const { data: newContact, error: contactError } = await supabase
       .from("contacts")
@@ -120,10 +168,12 @@ export async function processInboundMessage(supabase: SupabaseClient, message: N
       })
       .select("id")
       .single();
+
     if (contactError) {
       console.error("[inbound] failed creating contact", contactError);
       return { ok: false, reason: "contact_create_failed", error: contactError.message };
     }
+
     contactId = newContact.id;
     console.log("[inbound] contact created", { contactId, phone: normalizedPhone });
   } else {
@@ -140,6 +190,7 @@ export async function processInboundMessage(supabase: SupabaseClient, message: N
     .maybeSingle();
 
   let leadId = existingLead?.id;
+
   if (!leadId) {
     const { data: newLead, error: leadError } = await supabase
       .from("leads")
@@ -171,19 +222,31 @@ export async function processInboundMessage(supabase: SupabaseClient, message: N
     console.log("[inbound] lead found", { leadId });
   }
 
-  const { data: currentLead } = await supabase.from("leads").select("unread_count").eq("id", leadId).maybeSingle();
-  const { error: leadUpdateError } = await supabase.from("leads").update({
-    contact_id: contactId,
-    contact_phone: normalizedPhone,
-    whatsapp_phone: normalizedPhone,
-    last_message: message.messageText,
-    last_message_at: nowIso,
-    last_contact_at: nowIso,
-    updated_at: new Date().toISOString(),
-    unread_count: (currentLead?.unread_count ?? 0) + 1,
-  }).eq("id", leadId);
-  if (leadUpdateError) console.error("[inbound] lead update failed", leadUpdateError);
-  else console.log("[inbound] lead updated", { leadId });
+  const { data: currentLead } = await supabase
+    .from("leads")
+    .select("unread_count")
+    .eq("id", leadId)
+    .maybeSingle();
+
+  const { error: leadUpdateError } = await supabase
+    .from("leads")
+    .update({
+      contact_id: contactId,
+      contact_phone: normalizedPhone,
+      whatsapp_phone: normalizedPhone,
+      last_message: message.messageText,
+      last_message_at: nowIso,
+      last_contact_at: nowIso,
+      updated_at: new Date().toISOString(),
+      unread_count: (currentLead?.unread_count ?? 0) + 1,
+    })
+    .eq("id", leadId);
+
+  if (leadUpdateError) {
+    console.error("[inbound] lead update failed", leadUpdateError);
+  } else {
+    console.log("[inbound] lead updated", { leadId });
+  }
 
   const { data: messageRow, error: messageInsertError } = await supabase
     .from("lead_messages")
@@ -208,26 +271,31 @@ export async function processInboundMessage(supabase: SupabaseClient, message: N
     console.error("[inbound] message insert failed", messageInsertError);
     return { ok: false, reason: "message_insert_failed", error: messageInsertError.message };
   }
+
   console.log("[inbound] message inserted", { messageId: messageRow.id });
 
   const { error: interactionError } = await supabase.from("lead_interactions").insert({
     organization_id: orgId,
     lead_id: leadId,
-    event_type: "message_received",
-    channel: "whatsapp",
+    type: "message_received",
     content: message.messageText,
-    payload: message.rawPayload,
     metadata: {
       provider: message.provider,
+      channel: "whatsapp",
       message_type: message.messageType,
       media_url: message.mediaUrl,
       provider_message_id: message.providerMessageId,
       lead_message_id: messageRow.id,
+      wa_id: message.waId ?? normalizedPhone,
     },
+    created_at: nowIso,
   });
 
-  if (interactionError) console.error("[inbound] interaction insert failed", interactionError);
-  else console.log("[inbound] interaction inserted", { leadId });
+  if (interactionError) {
+    console.error("[inbound] interaction insert failed", interactionError);
+  } else {
+    console.log("[inbound] interaction inserted", { leadId });
+  }
 
   try {
     const { error: rpcError } = await supabase.rpc("register_whatsapp_inbound", {
@@ -243,13 +311,22 @@ export async function processInboundMessage(supabase: SupabaseClient, message: N
       _delivered_at: nowIso,
     });
 
-    if (rpcError) console.error("[inbound] rpc skipped due error", rpcError);
-    else console.log("[inbound] rpc executed", { leadId });
+    if (rpcError) {
+      console.error("[inbound] rpc skipped due error", rpcError);
+    } else {
+      console.log("[inbound] rpc executed", { leadId });
+    }
   } catch (rpcError) {
     console.error("[inbound] rpc crashed", rpcError);
   }
 
-  return { ok: true, organizationId: orgId, leadId, contactId, leadMessageId: messageRow.id };
+  return {
+    ok: true,
+    organizationId: orgId,
+    leadId,
+    contactId,
+    leadMessageId: messageRow.id,
+  };
 }
 
 export async function applyStatusEvent(
@@ -265,21 +342,26 @@ export async function applyStatusEvent(
   },
 ) {
   const normalizedPhone = normalizePhone(input.phone);
-  const { data: lead } = normalizedPhone
-    ? await supabase
-      .from("leads")
-      .select("id")
-      .eq("organization_id", input.organizationId)
-      .or(`whatsapp_phone.eq.${normalizedPhone},contact_phone.eq.${normalizedPhone}`)
-      .order("updated_at", { ascending: false })
-      .limit(1)
-      .maybeSingle()
-    : { data: null as any };
+
+  const { data: lead } =
+    normalizedPhone && isLikelyValidWhatsappPhone(normalizedPhone)
+      ? await supabase
+          .from("leads")
+          .select("id")
+          .eq("organization_id", input.organizationId)
+          .or(`whatsapp_phone.eq.${normalizedPhone},contact_phone.eq.${normalizedPhone}`)
+          .order("updated_at", { ascending: false })
+          .limit(1)
+          .maybeSingle()
+      : { data: null as any };
 
   if (input.providerMessageId) {
     await supabase
       .from("lead_messages")
-      .update({ status: input.status ?? undefined, delivered_at: input.deliveredAt ?? undefined })
+      .update({
+        status: input.status ?? undefined,
+        delivered_at: input.deliveredAt ?? undefined,
+      })
       .eq("provider_message_id", input.providerMessageId);
   }
 
@@ -287,14 +369,15 @@ export async function applyStatusEvent(
     await supabase.from("lead_interactions").insert({
       organization_id: input.organizationId,
       lead_id: lead.id,
-      event_type: "message_status",
-      channel: "whatsapp",
+      type: "message_status",
       content: input.status ?? null,
-      payload: input.rawPayload,
       metadata: {
         provider: input.provider,
         provider_message_id: input.providerMessageId,
+        channel: "whatsapp",
+        raw_payload: input.rawPayload,
       },
+      created_at: input.deliveredAt ?? new Date().toISOString(),
     });
   }
 }

@@ -32,6 +32,11 @@ function normalize(phone: string) {
   return String(phone || "").replace(/[^\d]/g, "");
 }
 
+function isLikelyValidWhatsappPhone(phone?: string | null) {
+  const normalized = normalize(phone || "");
+  return normalized.length >= 10 && normalized.length <= 15;
+}
+
 type SendMode = "cloud" | "vps";
 
 interface SendPayload {
@@ -96,7 +101,14 @@ async function resolveLeadPhone(leadId?: string) {
   if (!data) return null;
 
   const phone = normalize(data.whatsapp_phone || data.contact_phone || "");
-  if (!phone) return null;
+
+  if (!phone) {
+    return null;
+  }
+
+  if (!isLikelyValidWhatsappPhone(phone)) {
+    throw new Error("Lead com telefone inválido. Revise o cadastro/origem do webhook.");
+  }
 
   return {
     id: data.id,
@@ -138,9 +150,7 @@ async function sendViaCloud(params: {
   media_url?: string | null;
 }) {
   if (!ACCESS_TOKEN || !PHONE_NUMBER_ID) {
-    throw new Error(
-      "WHATSAPP_ACCESS_TOKEN ou WHATSAPP_PHONE_NUMBER_ID não configurados",
-    );
+    throw new Error("WHATSAPP_ACCESS_TOKEN ou WHATSAPP_PHONE_NUMBER_ID não configurados");
   }
 
   const payload = params.media_url
@@ -164,17 +174,14 @@ async function sendViaCloud(params: {
         },
       };
 
-  const response = await fetch(
-    `https://graph.facebook.com/v21.0/${PHONE_NUMBER_ID}/messages`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${ACCESS_TOKEN}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
+  const response = await fetch(`https://graph.facebook.com/v21.0/${PHONE_NUMBER_ID}/messages`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${ACCESS_TOKEN}`,
+      "Content-Type": "application/json",
     },
-  );
+    body: JSON.stringify(payload),
+  });
 
   const result = await response.json();
 
@@ -193,6 +200,7 @@ async function sendViaVps(params: {
   organizationId?: string;
 }) {
   const routing = resolveVpsRouting(params.organizationId);
+
   const payload = {
     number: params.to,
     to: params.to,
@@ -301,7 +309,10 @@ async function saveInteraction(params: {
       to: params.to,
       provider: params.mode,
       channel: params.mode === "vps" ? "whatsapp_vps" : "whatsapp_cloud",
+      provider_message_id: params.providerMessageId ?? null,
+      media_url: params.mediaUrl ?? null,
     },
+    created_at: nowIso,
   });
 
   if (error) {
@@ -334,8 +345,7 @@ serve(async (req) => {
   try {
     const body = (await req.json()) as SendPayload;
 
-    const mode: SendMode =
-      body.mode || body.provider || "vps";
+    const mode: SendMode = body.mode || body.provider || "vps";
 
     const text = String(body.text || body.message || "").trim();
     if (!text) {
@@ -347,6 +357,10 @@ serve(async (req) => {
       | { id: string; name?: string | null; phone: string }
       | null = null;
 
+    if (to && !isLikelyValidWhatsappPhone(to)) {
+      return json({ error: "Destino informado é inválido" }, 400);
+    }
+
     if (!to && body.leadId) {
       resolvedLead = await resolveLeadPhone(body.leadId);
       if (!resolvedLead?.phone) {
@@ -357,6 +371,10 @@ serve(async (req) => {
 
     if (!to) {
       return json({ error: "Destino não informado" }, 400);
+    }
+
+    if (!isLikelyValidWhatsappPhone(to)) {
+      return json({ error: "Telefone de destino inválido" }, 400);
     }
 
     const media_url = body.media_url ?? null;

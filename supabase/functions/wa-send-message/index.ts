@@ -7,7 +7,7 @@ const ACCESS_TOKEN = Deno.env.get("WHATSAPP_ACCESS_TOKEN") ?? "";
 const PHONE_NUMBER_ID = Deno.env.get("WHATSAPP_PHONE_NUMBER_ID") ?? "";
 const WHATSAPP_SERVER_URL = (
   Deno.env.get("WHATSAPP_SERVER_URL") ??
-  "https://whatsapp.likedigitalmkt.com.br"
+  "https://crm.zapzdelivery.com.br"
 ).replace(/\/+$/, "");
 
 const supabase = createClient(SUPABASE_URL, SERVICE_ROLE);

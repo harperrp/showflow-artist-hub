@@ -66,7 +66,15 @@ function shouldIgnoreBaileysMessage(raw: any) {
   if (key?.fromMe === true) return true;
 
   const phone = extractPhoneFromWhatsappJid(remoteJid);
-  if (!phone) return true;
+  const fallbackPhone = normalizePhone(
+    raw?.phone ??
+    raw?.sender ??
+    raw?.from ??
+    raw?.participant ??
+    ""
+  );
+
+  if (!phone && !isLikelyValidWhatsappPhone(fallbackPhone)) return true;
 
   return false;
 }
@@ -97,13 +105,16 @@ function parseBaileysPayload(payload: any) {
       raw?.phone ??
       raw?.sender ??
       raw?.from ??
+      raw?.participant ??
       payload?.phone ??
       payload?.sender ??
       payload?.from ??
       ""
     );
 
-    const phone = phoneFromJid || fallbackPhone;
+    const phone =
+      (isLikelyValidWhatsappPhone(fallbackPhone) ? fallbackPhone : "") ||
+      phoneFromJid;
 
     if (!isLikelyValidWhatsappPhone(phone)) {
       console.warn("[baileys] invalid phone rejected", {

@@ -33,12 +33,28 @@ function assertRequiredId(value: string | null | undefined, label: string): stri
   return value;
 }
 
+function isValidBrazilWhatsAppPhone(phone?: string | null) {
+  return /^55\d{10,13}$/.test(String(phone ?? "").trim());
+}
+
+function resolveBestLeadPhone(lead: LeadRow): string {
+  const contactPhone = String(lead.contact_phone ?? "").trim();
+  const whatsappPhone = String(lead.whatsapp_phone ?? "").trim();
+  const genericPhone = String((lead as any).phone ?? "").trim();
+
+  if (isValidBrazilWhatsAppPhone(contactPhone)) return contactPhone;
+  if (isValidBrazilWhatsAppPhone(whatsappPhone)) return whatsappPhone;
+  if (genericPhone) return genericPhone;
+
+  return contactPhone || whatsappPhone || "";
+}
+
 function mapLeadRowToConversation(lead: LeadRow): Conversation {
   return {
     id: lead.id,
     organization_id: lead.organization_id,
     lead_id: lead.id,
-    contact_phone: lead.whatsapp_phone || lead.contact_phone || lead.phone || "",
+    contact_phone: resolveBestLeadPhone(lead),
     contact_name: lead.contractor_name,
     last_message_at: lead.last_message_at || lead.created_at,
     last_message_text: lead.last_message,
@@ -67,6 +83,7 @@ function mapConversationUpdatesToLeadUpdates(updates: Partial<Conversation>): Le
 
   if (updates.contact_phone !== undefined) {
     leadUpdates.contact_phone = updates.contact_phone;
+    (leadUpdates as any).whatsapp_phone = updates.contact_phone;
   }
 
   if (updates.stage !== undefined) {
@@ -128,9 +145,22 @@ export async function createLead(lead: Partial<Lead> & { organization_id: string
 export async function updateLead(id: string, updates: Partial<Lead>) {
   const requiredLeadId = assertRequiredId(id, "lead_id");
 
+  const normalizedUpdates: Record<string, unknown> = { ...updates };
+
+  const contactPhone = String((updates as any).contact_phone ?? "").trim();
+  const whatsappPhone = String((updates as any).whatsapp_phone ?? "").trim();
+
+  if (contactPhone && isValidBrazilWhatsAppPhone(contactPhone)) {
+    normalizedUpdates.contact_phone = contactPhone;
+    normalizedUpdates.whatsapp_phone = contactPhone;
+  } else if (whatsappPhone && isValidBrazilWhatsAppPhone(whatsappPhone)) {
+    normalizedUpdates.contact_phone = whatsappPhone;
+    normalizedUpdates.whatsapp_phone = whatsappPhone;
+  }
+
   const { data, error } = await supabase
     .from("leads")
-    .update(updates as LeadUpdate)
+    .update(normalizedUpdates as LeadUpdate)
     .eq("id", requiredLeadId)
     .select()
     .single();

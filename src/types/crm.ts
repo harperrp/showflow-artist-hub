@@ -7,6 +7,8 @@ export interface Lead {
   contractor_name: string;
   contact_phone?: string | null;
   contact_email?: string | null;
+  whatsapp_phone?: string | null;
+  phone?: string | null;
   city?: string | null;
   state?: string | null;
   origin?: string | null;
@@ -16,6 +18,19 @@ export interface Lead {
   event_name?: string | null;
   notes?: string | null;
   venue_name?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  last_message?: string | null;
+  last_message_at?: string | null;
+  last_message_preview?: string | null;
+  last_contact_at?: string | null;
+  unread_count?: number | null;
+  source?: string | null;
+  name?: string | null;
+  contact_id?: string | null;
+  venue_id?: string | null;
+  contractor_type?: string | null;
+  region?: string | null;
   created_by: string;
   created_at: string;
   updated_at: string;

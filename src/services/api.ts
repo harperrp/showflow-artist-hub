@@ -25,20 +25,6 @@ type LeadInteractionRow = {
 type CalendarEventRow = Database["public"]["Tables"]["calendar_events"]["Row"];
 type CalendarEventInsert = Database["public"]["Tables"]["calendar_events"]["Insert"];
 
-type LeadConversationRow = Pick<
-  LeadRow,
-  | "id"
-  | "organization_id"
-  | "contractor_name"
-  | "stage"
-  | "contact_phone"
-  | "whatsapp_phone"
-  | "last_message"
-  | "last_message_at"
-  | "unread_count"
-  | "created_at"
->;
-
 function assertRequiredId(value: string | null | undefined, label: string): string {
   if (!value) {
     throw new Error(`${label} é obrigatório`);
@@ -47,12 +33,12 @@ function assertRequiredId(value: string | null | undefined, label: string): stri
   return value;
 }
 
-function mapLeadRowToConversation(lead: LeadConversationRow): Conversation {
+function mapLeadRowToConversation(lead: LeadRow): Conversation {
   return {
     id: lead.id,
     organization_id: lead.organization_id,
     lead_id: lead.id,
-    contact_phone: lead.whatsapp_phone || lead.contact_phone || "",
+    contact_phone: lead.whatsapp_phone || lead.contact_phone || lead.phone || "",
     contact_name: lead.contractor_name,
     last_message_at: lead.last_message_at || lead.created_at,
     last_message_text: lead.last_message,
@@ -84,7 +70,7 @@ function mapConversationUpdatesToLeadUpdates(updates: Partial<Conversation>): Le
   }
 
   if (updates.stage !== undefined) {
-    leadUpdates.stage = updates.stage;
+    (leadUpdates as any).stage = updates.stage;
   }
 
   return leadUpdates;
@@ -123,7 +109,7 @@ export async function fetchLeads(orgId: string): Promise<Lead[]> {
     .order("created_at", { ascending: false });
 
   if (error) throw error;
-  return (data ?? []) as Lead[];
+  return (data ?? []) as unknown as Lead[];
 }
 
 export async function createLead(lead: Partial<Lead> & { organization_id: string; contractor_name: string; created_by: string }) {
@@ -136,7 +122,7 @@ export async function createLead(lead: Partial<Lead> & { organization_id: string
 
   const { data, error } = await supabase.from("leads").insert(payload).select().single();
   if (error) throw error;
-  return data as Lead;
+  return data as unknown as Lead;
 }
 
 export async function updateLead(id: string, updates: Partial<Lead>) {
@@ -150,7 +136,7 @@ export async function updateLead(id: string, updates: Partial<Lead>) {
     .single();
 
   if (error) throw error;
-  return data as Lead;
+  return data as unknown as Lead;
 }
 
 export async function fetchStages(orgId: string): Promise<PipelineStage[]> {
@@ -171,13 +157,13 @@ export async function fetchConversations(orgId: string): Promise<Conversation[]>
 
   const { data, error } = await supabase
     .from("leads")
-    .select("id, organization_id, contractor_name, stage, contact_phone, whatsapp_phone, last_message, last_message_at, unread_count, created_at")
+    .select("*")
     .eq("organization_id", requiredOrgId)
     .order("last_message_at", { ascending: false, nullsFirst: false });
 
   if (error) throw error;
 
-  return ((data ?? []) as LeadConversationRow[]).map(mapLeadRowToConversation);
+  return ((data ?? []) as LeadRow[]).map(mapLeadRowToConversation);
 }
 
 export async function updateConversation(id: string, updates: Partial<Conversation>) {
